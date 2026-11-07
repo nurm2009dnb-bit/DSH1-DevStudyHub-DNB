@@ -83,7 +83,7 @@ class FileSorterHandler(FileSystemEventHandler):
     print("Сканирование папки на наличие уже существующих файлов...")
     for item in self.source_dir.iterdir():
       if item.is_file():
-        self.process_file(item)
+        self.process_file(item) 
 
   def on_created(self, event):
     if event.is_directory:

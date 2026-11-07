@@ -1,18 +1,17 @@
 from pathlib import Path
+from datetime import datetime
 import sys
+import time
+import shutil
 
 # Принудительно добавляем корень проекта в sys.path, чтобы Python видел модуль database
 sys.path.append(str(Path(__file__).resolve().parent.parent))
-
-import os
-import shutil
-import time
 from database.models import SessionLocal, SortedFileLog
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 
-class FileSorterHandler(FileSystemEventHandler):
+class AdvencedFileSorterHandler(FileSystemEventHandler):
 
   def __init__(self, source_dir):
     self.source_dir = Path(source_dir)
@@ -23,54 +22,115 @@ class FileSorterHandler(FileSystemEventHandler):
     self.photo_dir = self.source_dir / "Photos"
     self.video_dir = self.source_dir / "Video"
 
-    self.code_dir.mkdir(exist_ok=True)
-    self.docs_dir.mkdir(exist_ok=True)
-    self.photo_dir.mkdir(exist_ok=True)
-    self.video_dir.mkdir(exist_ok=True)
+    # Подпапки для документов по контексту
+    self.presentations_dir = self.docs_dir / "Presentations"
+    self.alevel_dir = self.docs_dir / "A-Level"
+    self.lyceum_dir = self.docs_dir / "Lyceum"
+    self.other_docs_dir = self.docs_dir / "Other"
+
+    # Подпапки для кода по языкам
+    self.python_code = self.code_dir / "Python"
+    self.csharp_code = self.code_dir / "CSharp"
+    self.web_code = self.code_dir / "Web"
+    self.other_code = self.code_dir / "Other_Code"
+
+    # Создание всех папок автоматически
+    for folder in [
+      self.code_dir,
+      self.docs_dir,
+      self.photo_dir,
+      self.video_dir,
+      self.presentations_dir,
+      self.alevel_dir,
+      self.lyceum_dir,
+      self.other_docs_dir,
+      self.python_code,
+      self.csharp_code,
+      self.web_code,
+      self.other_code,
+    ]:
+      folder.mkdir(parents=True, exist_ok=True)
 
   def process_file(self, file_path: Path):
-    if file_path.resolve() in [
-      self.code_dir.resolve(),
-      self.docs_dir.resolve(),
-      self.photo_dir.resolve(),
-      self.video_dir.resolve(),
+    # Игнорируем сами папки сортировки, чтобы избежать рекурсии
+    if any(
+        parent.resolve() == file_path.resolve().parent
+        for parent in [
+            self.code_dir,
+            self.docs_dir,
+            self.photo_dir,
+            self.video_dir,
+        ]
+    ):
+      # Проверяем глубже по иерархии
+      pass
+
+    if file_path.relosve().parent in [
+      self.code_dir,
+        self.docs_dir,
+        self.photo_dir,
+        self.video_dir,
+        self.presentations_dir,
+        self.alevel_dir,
+        self.lyceum_dir,
+        self.other_docs_dir,
+        self.python_code,
+        self.csharp_code,
+        self.web_code,
+        self.other_code,
     ]:
       return
 
-    extension = file_path.suffix.lower()
+    extension = file_path.suffixes.lower()
+    filename_lower = file_path.name.lower()
     target_dir = None
-    
-    # Правила сортировки
-    if extension in [".py", ".cs", ".js", ".cpp", ".html", ".css"]:
-      target_dir = self.code_dir
-    elif extension in [".pdf", ".docx", ".txt", ".xlsx"]:
-      target_dir = self.docs_dir
+
+    # 1. Логика сортировки КОДА по подпапкам
+    if extension in [".py"]:
+      target_dir = self.python_code
+    elif extension in [".cs"]:
+      target_dir = self.csharp_code
+    elif extension in [".html", ".css", ".js"]:
+      target_dir = self.web_code
+    elif extension in [".cpp", ".cpp", ".h"]:
+      target_dir = self.other_code
+
+    # 2. Логика сортировки ДОКУМЕНТОВ по контексту (ключевым словам в названии)
+    elif extension in [".pdf", ".docx", ".txt", ".xlsx", ".pptx", ".ppt"]:
+      if "presentation" in filename_lower or extension in [".pptx", ".ppt"]:
+        target_dir = self.presentations_dir
+      elif "a-level" in filename_lower or "sat" in filename_lower or "math" in filename_lower:
+        target_dir = self.alevel_dir
+      elif "alwiut" in filename_lower or "lyceum" in filename_lower or "лицей" in filename_lower:
+        target_dir = self.lyceum_dir
+      else:
+        target_dir = self.other_docs_dir
+
+    # 3. Фото и видео
     elif extension in [".jpg", ".jpeg", ".png", ".gif", ".webp", ".tiff", ".svg"]:
       target_dir = self.photo_dir
     elif extension in [".mp4", ".mkv", ".mov", ".avi", ".webm", ".wmv"]:
-          target_dir = self.video_dir
+      target_dir = self.video_dir
 
+    # Защита от дубликатов: добавляем таймстамп
     if target_dir:
-      new_path = target_dir / file_path.name
+      new_path = target_dir/file_path.name
 
-      # Если файл с таким именем уже существует, добавляем метку времени
       if new_path.exists():
         new_path = (
-            target_dir / f"{file_path.stem}_{int(time.time())}{extension}"
+          target_dir / f"{file_path.stem}_{int(time.time())}{extension}"
         )
 
       try:
         shutil.move(str(file_path), str(new_path))
-        print(
-            f"[Успешно] Файл '{file_path.name}' перемещен в {target_dir.name}"
-        )
+        print(f"[Успешно] '{file_path.name}' -> {target_dir.relative_to(self.source_dir)}")
 
-        # Запись лога в базу данных SQLite
+        #Log в БД
         session = SessionLocal()
         db_log = SortedFileLog(
-            file_name=file_path.name,
-            original_path=str(file_path),
-            new_path=str(new_path),
+          file_name = file_path.name,
+          original_path = str(file_path),
+          new_path = str(new_path),
         )
         session.add(db_log)
         session.commit()
@@ -78,6 +138,7 @@ class FileSorterHandler(FileSystemEventHandler):
 
       except Exception as e:
         print(f"[Ошибка] Не удалось переместить файл: {e}")
+
     
   def sort_existing_files(self):
     print("Сканирование папки на наличие уже существующих файлов...")
@@ -88,21 +149,18 @@ class FileSorterHandler(FileSystemEventHandler):
   def on_created(self, event):
     if event.is_directory:
       return
-
     file_path = Path(event.src_path)
 
     # Небольшая пауза, чтобы файл успел полностью сохраниться/скачаться
     time.sleep(1)
-
     if not file_path.exists():
       return
-
     self.process_file(file_path)
 
 
 def start_cleaner(path_to_watch):
   # Используем наш класс FileSorterHandler
-  event_handler = FileSorterHandler(path_to_watch)
+  event_handler = AdvencedFileSorterHandler(path_to_watch)
   event_handler.sort_existing_files() 
   observer = Observer()
   observer.schedule(event_handler, path=path_to_watch, recursive=False)
